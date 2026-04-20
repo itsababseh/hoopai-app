@@ -1,93 +1,80 @@
-export type SessionType = 'full' | 'recovery' | 'skills' | 'conditioning';
-export type IntensityLevel = 'recovery' | 'light' | 'moderate' | 'intense' | 'max';
-export type DrillStatus = 'pending' | 'active' | 'completed' | 'skipped';
-export type SessionStatus = 'generated' | 'active' | 'completed' | 'abandoned';
+// Add to existing constants/sessionTypes.ts
 
-export interface GeneratedSession {
+export type ReadinessTier =
+  | 'peak'
+  | 'ready'
+  | 'moderate'
+  | 'low'
+  | 'rest'
+  | 'recovery';
+
+export type DrillCategory =
+  | 'ball-handling'
+  | 'shooting'
+  | 'footwork'
+  | 'conditioning'
+  | 'defense'
+  | 'finishing'
+  | 'passing'
+  | 'strength';
+
+export type ExecutionState =
+  | 'idle'
+  | 'active'
+  | 'paused'
+  | 'rest'
+  | 'completing_drill'
+  | 'early_exit_confirm'
+  | 'completed'
+  | 'partial_complete';
+
+export interface DrillItem {
   id: string;
-  generatedAt: string;
-  date: string;
-  title: string;
-  subtitle: string;
-  sessionType: SessionType;
-  intensityLevel: IntensityLevel;
-  readinessSnapshot: number;
-  estimatedDuration: number;
-  actualDuration?: number;
-  drills: SessionDrill[];
-  coachingMessage: string;
-  focusArea: string;
-  warmupDuration: number;
-  cooldownDuration: number;
-  status: SessionStatus;
-  regenerationCount: number;
-  goalAlignment: string;
+  index: number;
+  name: string;
+  category: DrillCategory;
+  instructions: string[];
+  totalSets: number;
+  reps?: number;
+  duration?: number; // seconds, undefined if rep-based
+  restDuration: number; // seconds between sets/drills
+  difficulty: 'easy' | 'medium' | 'hard';
+  equipment: string[];
+  coachingCues: string[];
 }
 
-export interface SessionDrill {
-  id: string;
+export interface DrillResult {
   drillId: string;
-  drillName: string;
-  orderIndex: number;
-  targetSets: number;
+  drillIndex: number;
+  skipped: boolean;
   completedSets: number;
-  status: DrillStatus;
-  durationEstimate: number;
-  restDuration: number;
-  coachingCue?: string;
-  youtubeId: string;
-  category: string;
-  reps: string;
-}
-
-export interface ActiveSessionState {
-  sessionId: string;
-  startedAt: string;
-  currentDrillIndex: number;
-  currentSet: number;
-  isResting: boolean;
-  restSecondsRemaining: number;
-  elapsedSeconds: number;
-  completedDrillIds: string[];
-  skippedDrillIds: string[];
-  pausedAt?: string;
-  totalPausedSeconds: number;
+  completedReps: number[];
+  setDurations: number[];
+  restTimerSkippedCount: number;
+  error?: string;
 }
 
 export interface SessionResult {
   id: string;
-  sessionId: string;
-  date: string;
-  completedAt: string;
-  status: 'completed' | 'abandoned';
-  actualDuration: number;
-  totalDrills: number;
-  completedDrills: number;
-  skippedDrills: number;
-  completionRate: number;
-  totalSetsCompleted: number;
-  streakAtCompletion: number;
-  readinessScore: number;
-  sessionType: SessionType;
-  intensityLevel: IntensityLevel;
-  isMilestone: boolean;
-  milestoneDay?: number;
+  sessionPlanId: string;
+  userId: string;
+  startedAt: string; // ISO 8601
+  completedAt?: string; // ISO 8601
+  elapsedSeconds: number;
+  pausedDuration: number; // seconds spent paused
+  isPartial: boolean;
+  isStale: boolean;
+  completionPercentage: number; // 0–1
+  totalXPAwarded: number;
+  drillResults: DrillResult[];
+  streakDayAfter: number;
+  xpTotalAfter: number;
 }
 
-export const MILESTONE_DAYS = [3, 7, 14, 21, 30, 60, 100];
-
-export const INTENSITY_REST_SECONDS: Record<IntensityLevel, number> = {
-  recovery: 60,
-  light: 45,
-  moderate: 30,
-  intense: 20,
-  max: 15,
-};
-
-export const INTENSITY_SETS: Record<IntensityLevel, [number, number]> = {
-  recovery: [2, 2],
-  light: [2, 3],
-  moderate: [3, 3],
-  intense: [3, 4],
-  max: [4, 5],
-};
+export interface InProgressSession {
+  sessionPlan: any;
+  sessionResult: Partial<SessionResult>;
+  currentDrillIndex: number;
+  currentSetIndex: number;
+  lastPersistedAt: string; // ISO 8601
+}

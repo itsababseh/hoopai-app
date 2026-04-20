@@ -151,7 +151,7 @@ export const useActiveSessionStore = create<ActiveSessionStore>((set, get) => ({
     if (!activeState || !currentSession) return null;
     const completed = activeState.completedDrillIds.length;
     const total = currentSession.drills.length;
-    const rate = completed / total;
+    const rate = total > 0 ? completed / total : 0;
     if (rate < 0.6) {
       const result: SessionResult = {
         id: `result-${Date.now()}`,
@@ -203,7 +203,10 @@ export const useActiveSessionStore = create<ActiveSessionStore>((set, get) => ({
     return result;
   },
 
-  setGenerationStatus: (status) => set({ generationStatus: status }),
+  setGenerationStatus: (status) => {
+    if (status === 'generating' && get().generationStatus === 'generating') return; // BUG-06 mutex
+    set({ generationStatus: status });
+  },
   incrementRegenCount: () => set(s => ({ regenerationCount: s.regenerationCount + 1 })),
   reset: () => set({ currentSession: null, activeState: null, todayResult: null, generationStatus: 'idle', regenerationCount: 0 }),
 }));

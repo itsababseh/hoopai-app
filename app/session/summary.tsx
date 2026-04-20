@@ -21,6 +21,13 @@ function useCountUp(target: number, duration: number, delay: number) {
 }
 
 export default function SessionSummaryScreen() {
+  // BUG-02 guard: redirect if no result (hot reload / deep link)
+  const { todayResult: _guard } = useActiveSessionStore();
+  if (!_guard) {
+    // Use effect to avoid calling router during render
+    React.useEffect(() => { router.replace('/(tabs)/today'); }, []);
+    return <View style={{ flex: 1, backgroundColor: Colors.background }} />;
+  }
   const { todayResult, currentSession } = useActiveSessionStore();
   const { streak } = useSessionStore();
   const theme = getReadinessTheme(todayResult?.readinessScore ?? 70);

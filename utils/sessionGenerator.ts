@@ -52,7 +52,7 @@ function getSessionType(
   }
   if (inputs.sorenessLevel >= 4 && intensityLevel === 'intense') intensityLevel = 'moderate';
   if (inputs.sorenessLevel >= 4 && intensityLevel === 'max') intensityLevel = 'intense';
-  if (inputs.hrvScore !== null && inputs.hrvScore !== undefined && inputs.hrvScore < 40) {
+  if (inputs.hrvScore !== null && inputs.hrvScore !== undefined && !isNaN(inputs.hrvScore) && inputs.hrvScore < 40) {
     sessionType = 'recovery';
     intensityLevel = 'recovery';
   }

@@ -1,241 +1,195 @@
-import React, { useRef, useCallback, useMemo } from 'react';
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useRef } from 'react';
+import { ScrollView, View, Pressable, SafeAreaView, RefreshControl } from 'react-native';
+import { router } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Text } from '../../components/ui/Text';
-import { Card, PressableCard } from '../../components/ui/Card';
+import { Colors } from '../../constants/theme';
+import { AppText } from '../../components/ui/Text';
 import { ProgressRing } from '../../components/ui/ProgressRing';
-import { Badge } from '../../components/ui/Badge';
+import { AISessionCard } from '../../components/session/AISessionCard';
+import { AIInsightsWidget } from '../../components/today/AIInsightsWidget';
 import { CheckInSheet } from '../../components/today/CheckInSheet';
 import { useUserStore } from '../../stores/userStore';
 import { useSessionStore } from '../../stores/sessionStore';
-import { Colors, Fonts, Spacing, Radius } from '../../constants/theme';
-import { DRILLS } from '../../constants/drills';
-import { router } from 'expo-router';
+import { useActiveSessionStore } from '../../stores/activeSessionStore';
+import { generateSession } from '../../utils/sessionGenerator';
+import { getReadinessTheme } from '../../utils/readinessTheme';
 
-function greeting(): string {
+function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
 }
 
-function todayDate(): string {
-  return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-}
-
 export default function TodayScreen() {
-  const profile      = useUserStore(s => s.profile);
-  const { todayCheckIn, currentStreak, totalSessions } = useSessionStore();
-  const sheetRef     = useRef<BottomSheet>(null);
-  const snapPoints   = useMemo(() => ['75%', '92%'], []);
+  const { profile } = useUserStore();
+  const { todayCheckIn, history, streak } = useSessionStore();
+  const { currentSession, generationStatus, regenerationCount, setCurrentSession, setGenerationStatus, incrementRegenCount } = useActiveSessionStore();
+  const sheetRef = useRef<BottomSheet>(null);
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  const openSheet = useCallback(() => sheetRef.current?.expand(), []);
-  const closeSheet = useCallback(() => sheetRef.current?.close(), []);
-
-  const readiness    = todayCheckIn?.readiness;
-  const score        = readiness?.score ?? 0;
+  const readinessScore = todayCheckIn?.readinessScore ?? 0;
   const hasCheckedIn = !!todayCheckIn;
+  const theme = getReadinessTheme(readinessScore);
 
-  // Recommend first 3 drills based on goal
-  const recommendedDrills = DRILLS.filter(d =>
-    profile?.primaryGoal === 'overall' ? true : d.category === profile?.primaryGoal
-  ).slice(0, 3);
+  // Auto-generate session on mount if checked in and none yet
+  useEffect(() => {
+    if (hasCheckedIn && generationStatus === 'idle' && !currentSession) {
+      runGeneration();
+    }
+  }, [hasCheckedIn]);
 
-  const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
-  );
+  function runGeneration(seed?: number) {
+    setGenerationStatus('generating');
+    setTimeout(() => {
+      try {
+        const recentDrillIds = history.slice(-7).flatMap((s: any) => s.drillIds ?? []);
+        const session = generateSession({
+          readinessScore: hasCheckedIn ? readinessScore : 70,
+          energyLevel: todayCheckIn?.energyLevel ?? 5,
+          sorenessLevel: todayCheckIn?.sorenessLevel ?? 3,
+          sleepQuality: todayCheckIn?.sleepScore ? Math.round(todayCheckIn.sleepScore / 20) : 3,
+          position: profile?.position ?? 'PG',
+          skillLevel: (profile?.level ?? 'intermediate') as any,
+          primaryGoal: (profile?.primaryGoal ?? 'scoring') as any,
+          sessionDurationPref: (profile?.sessionDuration ?? 45) as any,
+          recentDrillIds,
+          streakCount: streak,
+          regenerationSeed: seed ?? Date.now(),
+        });
+        setCurrentSession(session);
+      } catch {
+        setGenerationStatus('error');
+      }
+    }, 3500); // simulate generation time
+  }
+
+  const handleRegenerate = () => {
+    if (regenerationCount >= 3) return;
+    incrementRegenCount();
+    Haptics.selectionAsync();
+    setGenerationStatus('generating');
+    setTimeout(() => runGeneration(Date.now() + regenerationCount), 100);
+  };
+
+  const handleStartSession = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    router.push('/session/active');
+  };
+
+  const handleCheckIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    sheetRef.current?.expand();
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
+  };
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView edges={['top']} style={styles.safe}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
+      >
         {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting()},</Text>
-            <Text style={styles.name}>{profile?.name ?? 'Baller'}</Text>
-          </View>
-          <TouchableOpacity style={styles.avatarBtn}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{(profile?.name ?? 'B')[0].toUpperCase()}</Text>
-            </View>
-          </TouchableOpacity>
+        <View style={{ paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8 }}>
+          <AppText variant="body" style={{ color: Colors.textSecondary }}>{getGreeting()}{profile?.name ? `, ${profile.name}` : ''}</AppText>
+          <AppText variant="display" style={{ fontSize: 32, marginTop: 4 }}>Today's Game Plan</AppText>
         </View>
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Date */}
-          <Text style={styles.date}>{todayDate()}</Text>
-
-          {/* Readiness Card */}
-          <TouchableOpacity onPress={openSheet} activeOpacity={0.85}>
-            <LinearGradient
-              colors={hasCheckedIn ? ['#1A1A2E', Colors.surface] : [Colors.surface2, Colors.surface]}
-              style={styles.readinessCard}
-            >
-              <View style={styles.readinessLeft}>
-                <Text style={styles.readinessLabel}>READINESS</Text>
-                {hasCheckedIn ? (
-                  <>
-                    <Text style={[styles.readinessScore, { color: readiness!.color }]}>
-                      {readiness!.label}
-                    </Text>
-                    <Text style={styles.readinessExplanation} numberOfLines={2}>
-                      {readiness!.explanation}
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.readinessPrompt}>Check in to see{'\n'}your score</Text>
-                    <View style={styles.checkInBtn}>
-                      <Text style={styles.checkInBtnText}>Log Check-In →</Text>
-                    </View>
-                  </>
-                )}
+        {/* Readiness Card */}
+        <Pressable onPress={handleCheckIn} style={{ marginHorizontal: 16, marginTop: 12, borderRadius: 20, backgroundColor: Colors.surface, borderWidth: 1, borderColor: hasCheckedIn ? theme.colorBorder : Colors.border, padding: 20 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="label" style={{ color: Colors.textTertiary }}>READINESS SCORE</AppText>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
+                <AppText variant="display" style={{ fontSize: 56, color: hasCheckedIn ? theme.color : Colors.textTertiary }}>
+                  {hasCheckedIn ? readinessScore : '--'}
+                </AppText>
+                {hasCheckedIn && <AppText variant="title" style={{ color: theme.color, fontSize: 16 }}>{theme.label}</AppText>}
               </View>
-              <ProgressRing
-                score={score}
-                size={100}
-                strokeWidth={7}
-                color={readiness?.color ?? Colors.textTertiary}
-                label={hasCheckedIn ? 'SCORE' : '—'}
-              />
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* Stats Row */}
-          <View style={styles.statsRow}>
-            {[
-              { label: 'STREAK', value: `${currentStreak}`, unit: 'days' },
-              { label: 'SESSIONS', value: `${totalSessions}`, unit: 'total' },
-              { label: 'LEVEL', value: profile?.skillLevel?.toUpperCase() ?? '—', unit: '' },
-            ].map(s => (
-              <Card key={s.label} style={styles.statCard}>
-                <Text style={styles.statLabel}>{s.label}</Text>
-                <Text style={styles.statValue}>{s.value}</Text>
-                {s.unit ? <Text style={styles.statUnit}>{s.unit}</Text> : null}
-              </Card>
-            ))}
+              {!hasCheckedIn && (
+                <AppText variant="body" style={{ marginTop: 4, color: Colors.accent }}>Tap to check in →</AppText>
+              )}
+              {hasCheckedIn && (
+                <AppText variant="body" style={{ marginTop: 4 }}>{currentSession ? 'Session ready below' : 'Building your session...'}</AppText>
+              )}
+            </View>
+            <ProgressRing size={80} progress={hasCheckedIn ? readinessScore / 100 : 0} color={hasCheckedIn ? theme.color : Colors.textTertiary} strokeWidth={6} />
           </View>
+        </Pressable>
 
-          {/* Today's Session */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Today's Session</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/train')}>
-              <Text style={styles.sectionAction}>See all →</Text>
-            </TouchableOpacity>
-          </View>
-
-          {recommendedDrills.map(drill => (
-            <PressableCard
-              key={drill.id}
-              style={styles.drillCard}
-              onPress={() => router.push({ pathname: '/drill/[id]', params: { id: drill.id } })}
-            >
-              <View style={styles.drillRow}>
-                <View style={styles.drillThumb}>
-                  <Text style={styles.drillThumbText}>▶</Text>
-                </View>
-                <View style={styles.drillInfo}>
-                  <Text style={styles.drillTitle}>{drill.title}</Text>
-                  <Text style={styles.drillMeta}>{drill.durationMinutes} min · {drill.sets} sets · {drill.reps}</Text>
-                  <View style={styles.drillBadges}>
-                    <Badge label={drill.category} variant="accent" />
-                    <Badge label={drill.difficulty} variant="neutral" />
-                  </View>
-                </View>
-              </View>
-            </PressableCard>
+        {/* Stats Row */}
+        <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 16, marginTop: 12 }}>
+          {[
+            { label: 'Streak', value: `${streak}d`, icon: '🔥' },
+            { label: 'Sessions', value: String(history.length), icon: '📊' },
+            { label: 'Level', value: profile?.level ?? 'Beginner', icon: '⚡' },
+          ].map(stat => (
+            <View key={stat.label} style={{ flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Colors.border, alignItems: 'center' }}>
+              <AppText style={{ fontSize: 20 }}>{stat.icon}</AppText>
+              <AppText variant="heading" style={{ fontSize: 18, marginTop: 4 }}>{stat.value}</AppText>
+              <AppText variant="body" style={{ fontSize: 11, marginTop: 2 }}>{stat.label}</AppText>
+            </View>
           ))}
+        </View>
 
-          {/* Bottom padding for tab bar */}
-          <View style={{ height: 100 }} />
-        </ScrollView>
-      </SafeAreaView>
+        {/* AI Session Card */}
+        <View style={{ marginHorizontal: 16, marginTop: 20 }}>
+          <AppText variant="label" style={{ color: Colors.textTertiary, marginBottom: 12 }}>TODAY'S SESSION</AppText>
+          {!hasCheckedIn ? (
+            <Pressable onPress={handleCheckIn} style={{ borderRadius: 16, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, padding: 24, alignItems: 'center' }}>
+              <AppText style={{ fontSize: 32 }}>📋</AppText>
+              <AppText variant="title" style={{ marginTop: 12, textAlign: 'center' }}>Complete your check-in</AppText>
+              <AppText variant="body" style={{ textAlign: 'center', marginTop: 4 }}>We'll build a personalized session based on how you feel today</AppText>
+              <View style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.accent }}>
+                <AppText variant="title" style={{ color: '#fff', fontSize: 14 }}>Check In Now</AppText>
+              </View>
+            </Pressable>
+          ) : (
+            <AISessionCard
+              session={currentSession}
+              status={generationStatus}
+              readinessScore={readinessScore}
+              onStart={handleStartSession}
+              onRegenerate={handleRegenerate}
+              onDrillPress={id => router.push(`/drill/${id}`)}
+              regenCount={regenerationCount}
+            />
+          )}
+        </View>
 
-      {/* Check-In Bottom Sheet */}
+        {/* AI Insights */}
+        <View style={{ marginTop: 20 }}>
+          <AppText variant="label" style={{ color: Colors.textTertiary, marginBottom: 12, marginHorizontal: 16 }}>COACH AI</AppText>
+          <AIInsightsWidget />
+        </View>
+      </ScrollView>
+
+      {/* Check-in Bottom Sheet */}
       <BottomSheet
         ref={sheetRef}
         index={-1}
-        snapPoints={snapPoints}
+        snapPoints={['75%']}
         enablePanDownToClose
-        backdropComponent={renderBackdrop}
-        backgroundStyle={styles.sheetBg}
-        handleIndicatorStyle={styles.sheetHandle}
+        backgroundStyle={{ backgroundColor: Colors.surface }}
+        handleIndicatorStyle={{ backgroundColor: Colors.border }}
+        backdropComponent={(props) => (
+          <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.7} />
+        )}
       >
-        <CheckInSheet onClose={closeSheet} existingData={todayCheckIn} />
+        <CheckInSheet onComplete={() => {
+          sheetRef.current?.close();
+          // Trigger session generation after check-in
+          setTimeout(() => {
+            if (!currentSession) runGeneration();
+          }, 500);
+        }} />
       </BottomSheet>
-    </View>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  safe: { flex: 1 },
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
-  },
-  greeting: { fontFamily: Fonts.inter, fontSize: 14, color: Colors.textSecondary },
-  name: { fontFamily: Fonts.interBold, fontSize: 22, color: Colors.textPrimary },
-  avatarBtn: {},
-  avatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.accent + '30',
-    borderWidth: 1, borderColor: Colors.accent + '60',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  avatarText: { fontFamily: Fonts.interBold, fontSize: 16, color: Colors.accent },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: Spacing.lg, gap: Spacing.md },
-  date: { fontFamily: Fonts.inter, fontSize: 13, color: Colors.textTertiary, marginBottom: -4 },
-  // Readiness card
-  readinessCard: {
-    borderRadius: Radius.lg, padding: Spacing.lg,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  readinessLeft: { flex: 1, gap: 6, paddingRight: Spacing.md },
-  readinessLabel: { fontFamily: Fonts.interSemi, fontSize: 11, color: Colors.textTertiary, letterSpacing: 1.5 },
-  readinessScore: { fontFamily: Fonts.interBold, fontSize: 28 },
-  readinessExplanation: { fontFamily: Fonts.inter, fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
-  readinessPrompt: { fontFamily: Fonts.interBold, fontSize: 20, color: Colors.textPrimary, lineHeight: 26 },
-  checkInBtn: { alignSelf: 'flex-start', backgroundColor: Colors.accent + '20', borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 6 },
-  checkInBtnText: { fontFamily: Fonts.interSemi, fontSize: 13, color: Colors.accent },
-  // Stats
-  statsRow: { flexDirection: 'row', gap: Spacing.sm },
-  statCard: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: Spacing.md },
-  statLabel: { fontFamily: Fonts.interSemi, fontSize: 9, color: Colors.textTertiary, letterSpacing: 1.2 },
-  statValue: { fontFamily: Fonts.interBold, fontSize: 20, color: Colors.textPrimary },
-  statUnit: { fontFamily: Fonts.inter, fontSize: 11, color: Colors.textTertiary },
-  // Section
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { fontFamily: Fonts.interBold, fontSize: 18, color: Colors.textPrimary },
-  sectionAction: { fontFamily: Fonts.interSemi, fontSize: 13, color: Colors.accent },
-  // Drill card
-  drillCard: { marginBottom: 0 },
-  drillRow: { flexDirection: 'row', gap: Spacing.md, alignItems: 'center' },
-  drillThumb: {
-    width: 56, height: 56, borderRadius: Radius.sm,
-    backgroundColor: Colors.surface2, alignItems: 'center', justifyContent: 'center',
-  },
-  drillThumbText: { fontSize: 20, color: Colors.accent },
-  drillInfo: { flex: 1, gap: 4 },
-  drillTitle: { fontFamily: Fonts.interSemi, fontSize: 15, color: Colors.textPrimary },
-  drillMeta: { fontFamily: Fonts.inter, fontSize: 12, color: Colors.textTertiary },
-  drillBadges: { flexDirection: 'row', gap: 6, marginTop: 2 },
-  // Sheet
-  sheetBg: { backgroundColor: Colors.surface },
-  sheetHandle: { backgroundColor: Colors.border, width: 40 },
-});
